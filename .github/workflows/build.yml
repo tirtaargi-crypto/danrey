@@ -1,0 +1,87 @@
+name: Build DanRey APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build tools
+        run: sdkmanager "platform-tools" "build-tools;35.0.0"
+
+      - name: Install APKTool
+        run: |
+          curl -fsSL --retry 3 \
+            https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar \
+            -o "$RUNNER_TEMP/apktool.jar"
+          printf '#!/usr/bin/env bash\nexec java -jar "%s" "$@"\n' "$RUNNER_TEMP/apktool.jar" > "$RUNNER_TEMP/apktool"
+          chmod +x "$RUNNER_TEMP/apktool"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Extract input ZIP
+        run: |
+          test -f base.zip || { echo 'base.zip tidak ditemukan di root repository'; exit 1; }
+          mkdir -p input
+          unzip -o base.zip -d input
+          APK_PATH="$(find input -type f -name '*.apk' | head -n 1)"
+          test -n "$APK_PATH" || { echo 'Tidak ada file APK di dalam base.zip'; exit 1; }
+          cp "$APK_PATH" input.apk
+
+      - name: Decode and change app label
+        run: |
+          apktool d input.apk -o decoded -f
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          manifest = Path('decoded/AndroidManifest.xml')
+          if not manifest.exists():
+              raise SystemExit('AndroidManifest.xml tidak ditemukan')
+          tree = ET.parse(manifest)
+          app = tree.getroot().find('application')
+          if app is None:
+              raise SystemExit('Tag application tidak ditemukan')
+          app.set('{http://schemas.android.com/apk/res/android}label', 'DanRey')
+          tree.write(manifest, encoding='utf-8', xml_declaration=True)
+          print('Label aplikasi diubah menjadi DanRey')
+          PY
+
+      - name: Rebuild APK
+        run: apktool b decoded -o DanRey-unsigned.apk
+
+      - name: Align and sign APK
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          "$BUILD_TOOLS/zipalign" -f 4 DanRey-unsigned.apk DanRey-aligned.apk
+          keytool -genkeypair -noprompt \
+            -keystore danrey-debug.keystore \
+            -storepass android -keypass android \
+            -alias danrey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=DanRey, OU=Android, O=DanRey, L=Jakarta, S=DKI Jakarta, C=ID"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks danrey-debug.keystore \
+            --ks-pass pass:android --key-pass pass:android \
+            --out DanRey.apk DanRey-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose DanRey.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DanRey-APK
+          path: DanRey.apk
+          if-no-files-found: error
