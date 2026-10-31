@@ -22,52 +22,44 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: 'yes'
+          log-accepted-android-sdk-licenses: 'false'
 
-      - name: Accept Android SDK Licenses
-        shell: bash
+      - name: Check Repository
         run: |
-          set -o pipefail
-          yes | sdkmanager --licenses
-
-      - name: Check Project Files
-        run: |
-          echo "Checking repository..."
+          echo "Repository files:"
           ls -la
-          echo "Checking base.zip..."
           test -f base.zip || {
             echo "ERROR: base.zip tidak ditemukan"
             exit 1
           }
 
-      - name: Extract Base ZIP
+      - name: Extract ZIP
         run: |
           mkdir -p workspace
           unzip -o base.zip -d workspace
-          echo "ZIP extracted successfully"
           find workspace -maxdepth 3 -type f | head -100
 
-      - name: Build Project
-        shell: bash
+      - name: Check Android Project
         run: |
-          cd workspace
-
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug
-          elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
-            gradle assembleDebug
-          else
-            echo "ERROR: Tidak ditemukan project Gradle Android."
-            echo "ZIP ini harus berisi source project Android, bukan hanya file APK."
+          if [ ! -f workspace/gradlew ]; then
+            echo "ERROR: gradlew tidak ditemukan."
+            echo "File base.zip bukan source project Gradle Android yang lengkap."
             exit 1
           fi
 
+      - name: Build APK
+        run: |
+          cd workspace
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: DanRey-APK
-          path: |
-            workspace/**/build/outputs/apk/**/*.apk
+          path: workspace/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
