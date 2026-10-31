@@ -9,57 +9,82 @@ on:
 
 jobs:
   build:
+    name: Build DanRey
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Ambil repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Setup Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
-          accept-android-sdk-licenses: 'yes'
-          log-accepted-android-sdk-licenses: 'false'
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
+      # 4. Periksa file repository
       - name: Check Repository
+        shell: bash
         run: |
-          echo "Repository files:"
+          echo "Checking repository..."
           ls -la
-          test -f base.zip || {
+
+          if [ ! -f base.zip ]; then
             echo "ERROR: base.zip tidak ditemukan"
-            exit 1
-          }
-
-      - name: Extract ZIP
-        run: |
-          mkdir -p workspace
-          unzip -o base.zip -d workspace
-          find workspace -maxdepth 3 -type f | head -100
-
-      - name: Check Android Project
-        run: |
-          if [ ! -f workspace/gradlew ]; then
-            echo "ERROR: gradlew tidak ditemukan."
-            echo "File base.zip bukan source project Gradle Android yang lengkap."
             exit 1
           fi
 
+      # 5. Ekstrak ZIP
+      - name: Extract Base ZIP
+        shell: bash
+        run: |
+          mkdir -p workspace
+          unzip -o base.zip -d workspace
+
+          echo "ZIP extraction completed"
+          find workspace -maxdepth 4 -type f | head -100
+
+      # 6. Periksa struktur project
+      - name: Validate Android Project
+        shell: bash
+        run: |
+          if [ ! -f workspace/gradlew ]; then
+            echo "ERROR: gradlew tidak ditemukan."
+            echo "ZIP bukan source project Gradle Android lengkap."
+            exit 1
+          fi
+
+          if [ ! -f workspace/settings.gradle ] && \
+             [ ! -f workspace/settings.gradle.kts ]; then
+            echo "ERROR: settings.gradle tidak ditemukan."
+            exit 1
+          fi
+
+          chmod +x workspace/gradlew
+
+      # 7. Build APK
       - name: Build APK
+        shell: bash
         run: |
           cd workspace
-          chmod +x gradlew
           ./gradlew --no-daemon assembleDebug
 
+      # 8. Upload hasil APK
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: DanRey-APK
           path: workspace/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
+          retention-days: 7
